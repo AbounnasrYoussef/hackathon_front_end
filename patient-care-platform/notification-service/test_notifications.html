@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notification Test - WebSocket</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 20px;
+        }
+        
+        .status {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        
+        .status.connected {
+            background: #10b981;
+            color: white;
+        }
+        
+        .status.disconnected {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        button {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #5568d3;
+        }
+        
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        
+        .notifications {
+            margin-top: 20px;
+        }
+        
+        .notification-item {
+            background: #f9fafb;
+            border-left: 4px solid #667eea;
+            padding: 16px;
+            margin-bottom: 12px;
+            border-radius: 8px;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        .notification-item.CRITICAL {
+            border-left-color: #ef4444;
+            background: #fef2f2;
+        }
+        
+        .notification-item.HIGH {
+            border-left-color: #f59e0b;
+            background: #fffbeb;
+        }
+        
+        .notification-item.MEDIUM {
+            border-left-color: #3b82f6;
+            background: #eff6ff;
+        }
+        
+        .notification-item.LOW {
+            border-left-color: #10b981;
+            background: #f0fdf4;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        .notification-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .notification-title {
+            font-weight: 600;
+            font-size: 16px;
+            color: #1f2937;
+        }
+        
+        .notification-time {
+            font-size: 12px;
+            color: #6b7280;
+        }
+        
+        .notification-message {
+            color: #4b5563;
+            margin-bottom: 8px;
+        }
+        
+        .notification-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 8px;
+        }
+        
+        .notification-badge.CRITICAL {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .notification-badge.HIGH {
+            background: #f59e0b;
+            color: white;
+        }
+        
+        .notification-badge.MEDIUM {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .notification-badge.LOW {
+            background: #10b981;
+            color: white;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #9ca3af;
+        }
+        
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .stat-box {
+            flex: 1;
+            background: #f9fafb;
+            padding: 16px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            font-size: 14px;
+            color: #6b7280;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>🔔 WebSocket Notification Test</h1>
+            <p class="subtitle">Connect to the notification service and receive real-time alerts</p>
+            
+            <div id="status" class="status disconnected">⚫ Disconnected</div>
+            
+            <div class="input-group">
+                <input type="number" id="employeeId" placeholder="Enter Employee ID (e.g., 7 for Dr. Robert Chen)" min="1">
+                <button id="connectBtn" onclick="registerEmployee()">Register for Notifications</button>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="showAllToggle" onchange="toggleShowAll()" style="width: 20px; height: 20px; cursor: pointer;">
+                    <span style="color: #4b5563; font-size: 14px;">Show all notifications (including acknowledged)</span>
+                </label>
+            </div>
+            
+            <div class="stats">
+                <div class="stat-box">
+                    <div class="stat-value" id="unreadCount">0</div>
+                    <div class="stat-label">Unread</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="criticalCount">0</div>
+                    <div class="stat-label">Critical</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="highCount">0</div>
+                    <div class="stat-label">High</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2 style="margin-bottom: 20px;">📬 Real-Time Notifications</h2>
+            <div id="notifications" class="notifications">
+                <div class="empty-state">
+                    <div class="empty-state-icon">📭</div>
+                    <p>No notifications yet. Waiting for real-time alerts...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let socket;
+        let currentEmployeeId = null;
+        let unreadCount = 0;
+        let severityCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+        let showAll = false;
+        
+        // Connect to notification service on page load
+        function connectToNotificationService() {
+            socket = io('http://localhost:8004', {
+                transports: ['websocket', 'polling']
+            });
+            
+            socket.on('connect', function() {
+                console.log('✅ Connected to notification service');
+                document.getElementById('status').className = 'status connected';
+                document.getElementById('status').innerHTML = '🟢 Connected';
+            });
+            
+            socket.on('disconnect', function() {
+                console.log('❌ Disconnected from notification service');
+                document.getElementById('status').className = 'status disconnected';
+                document.getElementById('status').innerHTML = '⚫ Disconnected';
+            });
+            
+            socket.on('registration_success', function(data) {
+                console.log('✅ Registered for notifications:', data);
+                currentEmployeeId = data.employee_id;
+                loadExistingNotifications();
+                alert('✅ Successfully registered for notifications as Employee ID: ' + data.employee_id);
+            });
+            
+            socket.on('new_notification', function(data) {
+                console.log('🔔 New notification received:', data);
+                displayNotification(data);
+                updateStats();
+            });
+        }
+        
+        function registerEmployee() {
+            const employeeId = document.getElementById('employeeId').value;
+            
+            if (!employeeId) {
+                alert('Please enter an Employee ID');
+                return;
+            }
+            
+            if (!socket || !socket.connected) {
+                alert('Not connected to notification service. Please refresh the page.');
+                return;
+            }
+            
+            console.log('Registering employee:', employeeId);
+            socket.emit('register_employee', { employee_id: parseInt(employeeId) });
+        }
+        
+        function loadExistingNotifications() {
+            if (!currentEmployeeId) return;
+            
+            const unreadParam = showAll ? '' : '?unread=true';
+            fetch(`http://localhost:8004/notifications/${currentEmployeeId}${unreadParam}`)
+                .then(response => response.json())
+                .then(notifications => {
+                    const container = document.getElementById('notifications');
+                    container.innerHTML = '';
+                    
+                    if (notifications.length === 0) {
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <div class="empty-state-icon">📭</div>
+                                <p>No ${showAll ? '' : 'unread '}notifications</p>
+                            </div>
+                        `;
+                    } else {
+                        notifications.forEach(notif => displayNotification(notif, false));
+                    }
+                    
+                    updateStats();
+                })
+                .catch(err => console.error('Error loading notifications:', err));
+        }
+        
+        function toggleShowAll() {
+            showAll = document.getElementById('showAllToggle').checked;
+            loadExistingNotifications();
+        }
+        
+        function displayNotification(data, isNew = true) {
+            const container = document.getElementById('notifications');
+            
+            // Remove empty state if exists
+            const emptyState = container.querySelector('.empty-state');
+            if (emptyState) {
+                emptyState.remove();
+            }
+            
+            // Don't show read notifications if showAll is false
+            if (!showAll && data.is_read) {
+                return;
+            }
+            
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = `notification-item ${data.severity || 'MEDIUM'}`;
+            notification.id = `notif-${data.notification_id || Date.now()}`;
+            
+            const time = data.created_at ? new Date(data.created_at).toLocaleTimeString() : new Date().toLocaleTimeString();
+            const severity = data.severity || 'MEDIUM';
+            const readBadge = data.is_read ? '<span style="background: #9ca3af; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 8px;">READ</span>' : '';
+            
+            notification.innerHTML = `
+                <div class="notification-header">
+                    <div class="notification-title">${data.title || 'New Notification'} ${readBadge}</div>
+                    <div class="notification-time">${time}</div>
+                </div>
+                <div class="notification-message">${data.message || 'No message'}</div>
+                <div>
+                    <span class="notification-badge ${severity}">${severity}</span>
+                    <span style="font-size: 12px; color: #6b7280;">
+                        Incident: ${data.incident_id || 'N/A'} | 
+                        Type: ${data.type || 'N/A'}
+                    </span>
+                </div>
+            `;
+            
+            // Add to top of list (for new notifications) or bottom (for existing)
+            if (isNew) {
+                container.insertBefore(notification, container.firstChild);
+                playNotificationSound();
+            } else {
+                container.appendChild(notification);
+            }
+        }
+        
+        function updateStats() {
+            if (!currentEmployeeId) return;
+            
+            fetch(`http://localhost:8004/notifications/${currentEmployeeId}`)
+                .then(response => response.json())
+                .then(notifications => {
+                    unreadCount = notifications.filter(n => !n.is_read).length;
+                    severityCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+                    
+                    notifications.filter(n => !n.is_read).forEach(notif => {
+                        const severity = notif.severity || 'MEDIUM';
+                        if (severityCounts[severity] !== undefined) {
+                            severityCounts[severity]++;
+                        }
+                    });
+                    
+                    document.getElementById('unreadCount').textContent = unreadCount;
+                    document.getElementById('criticalCount').textContent = severityCounts.CRITICAL;
+                    document.getElementById('highCount').textContent = severityCounts.HIGH;
+                })
+                .catch(err => console.error('Error updating stats:', err));
+        }
+        
+        function playNotificationSound() {
+            // Create a simple beep sound
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.frequency.value = 800;
+            oscillator.type = 'sine';
+            
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+            
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 0.1);
+        }
+        
+        // Connect on page load
+        window.onload = function() {
+            connectToNotificationService();
+            
+            // Add Enter key support for employee ID input
+            document.getElementById('employeeId').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    registerEmployee();
+                }
+            });
+        };
+    </script>
+</body>
+</html>
