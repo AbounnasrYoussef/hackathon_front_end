@@ -3,13 +3,13 @@ import { oncallApi } from './api';
 const oncallService = {
     // Employee login
     login: async (login, password) => {
-        const response = await oncallApi.post('/oncall/login', { login, password });
+        const response = await oncallApi.post('/auth/login', { login, password });
         return response.data;
     },
 
     // Employee logout
     logout: async (employeeId) => {
-        const response = await oncallApi.post('/oncall/logout', { employee_id: employeeId });
+        const response = await oncallApi.post('/auth/logout', { employee_id: employeeId });
         return response.data;
     },
 

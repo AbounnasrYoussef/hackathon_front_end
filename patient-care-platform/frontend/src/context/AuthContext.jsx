@@ -19,7 +19,7 @@ export function AuthProvider({ children }) {
     const login = async (loginId, password) => {
         try {
             const response = await oncallService.login(loginId, password);
-            if (response.success) {
+            if (response.employee) {
                 const userData = response.employee;
                 setUser(userData);
                 localStorage.setItem('user', JSON.stringify(userData));

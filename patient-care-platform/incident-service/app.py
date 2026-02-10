@@ -6,6 +6,7 @@ import pika
 import os
 import time
 import threading
+import random
 from datetime import datetime
 from dotenv import load_dotenv
 import json
@@ -183,14 +184,43 @@ def publish_notification(notification_data):
         print(f"❌ Error publishing notification: {e}")
         return False
 
-def auto_assign_incident(incident_id, alert_type):
-    """Automatically assign incident to available on-call staff based on alert type."""
+def get_staff_workload(employee_id):
+    """Get current workload for a staff member."""
     try:
-        # Get priority role list for this alert type
+        conn = get_db_connection()
+        if not conn:
+            return {'total': 999, 'in_progress': 999}
+        
+        cur = conn.cursor()
+        
+        # Count total active incidents
+        cur.execute("""
+            SELECT COUNT(*) FROM incidents 
+            WHERE assigned_employee_id = %s AND status != 'RESOLVED'
+        """, (employee_id,))
+        total_active = cur.fetchone()[0]
+        
+        # Count in-progress incidents
+        cur.execute("""
+            SELECT COUNT(*) FROM incidents 
+            WHERE assigned_employee_id = %s AND status = 'IN_PROGRESS'
+        """, (employee_id,))
+        in_progress = cur.fetchone()[0]
+        
+        cur.close()
+        conn.close()
+        
+        return {'total': total_active, 'in_progress': in_progress}
+    except Exception as e:
+        print(f"❌ Error getting workload: {e}")
+        return {'total': 999, 'in_progress': 999}
+
+def auto_assign_incident(incident_id, alert_type):
+    """Assign incident using smart load-balancing strategy based on current workload."""
+    try:
         role_priorities = ALERT_ROLE_MAPPING.get(alert_type, ['NURSE'])
         
         for role in role_priorities:
-            # Query oncall service for available staff with this role
             response = requests.get(
                 f"{ONCALL_SERVICE_URL}/oncall/current",
                 params={'role': role},
@@ -200,65 +230,69 @@ def auto_assign_incident(incident_id, alert_type):
             if response.status_code == 200:
                 available_staff = response.json()
                 if available_staff and len(available_staff) > 0:
-                    # Use tier 1 priority (lowest tier number)
-                    staff = min(available_staff, key=lambda x: x['tier'])
+                    # Get workload for each staff member (all staff with this role, regardless of tier)
+                    staff_with_workload = []
+                    print(f"📊 Checking workload for {len(available_staff)} {role} staff members...")
+                    for staff in available_staff:
+                        workload = get_staff_workload(staff['employee_id'])
+                        staff_with_workload.append({'staff': staff, 'workload': workload})
+                        print(f"   {staff['name']} (ID:{staff['employee_id']}): {workload['in_progress']} in-progress, {workload['total']} total")
                     
-                    # Assign incident to this staff member
-                    assign_response = requests.post(
-                        f"{ONCALL_SERVICE_URL}/oncall/assign",
-                        json={
-                            'incident_id': incident_id,
-                            'employee_id': staff['employee_id']
-                        },
-                        timeout=5
-                    )
+                    # Sort by workload: fewest in_progress, then fewest total
+                    staff_with_workload.sort(key=lambda x: (x['workload']['in_progress'], x['workload']['total']))
+                    print(f"   → Selected: {staff_with_workload[0]['staff']['name']} (least busy)")
                     
-                    if assign_response.status_code == 200:
-                        assignment_data = assign_response.json()
-                        incident_data = assignment_data.get('incident', {})
-                        severity = incident_data.get('severity', 'MEDIUM')
-                        patient_id = incident_data.get('patient_id', 'Unknown')
-                        
-                        print(f"✅ Auto-assigned incident {incident_id} to {staff['name']} ({role})")
-                        
-                        # Add to history
-                        add_to_history(
-                            incident_id,
-                            staff['employee_id'],
-                            staff['name'],
-                            'ASSIGNED',
-                            'OPEN',
-                            'ASSIGNED',
-                            f"Auto-assigned based on alert type: {alert_type}"
-                        )
-                        
-                        # 🆕 Send notification via RabbitMQ
-                        notification_data = {
-                            'type': 'INCIDENT_ASSIGNED',
-                            'employee_id': staff['employee_id'],
-                            'employee_name': staff['name'],
-                            'employee_email': staff.get('email', ''),
-                            'employee_phone': staff.get('phone', ''),
-                            'incident_id': incident_id,
-                            'alert_type': alert_type,
-                            'severity': severity,
-                            'patient_id': patient_id,
-                            'title': f'New {severity} Incident Assigned',
-                            'message': f'{alert_type} incident for patient {patient_id} has been assigned to you.',
-                            'data': {
-                                'incident_id': incident_id,
-                                'alert_type': alert_type,
-                                'role': role,
-                                'tier': staff['tier']
-                            },
-                            'timestamp': datetime.now().isoformat()
-                        }
-                        
-                        publish_notification(notification_data)
-                        
-                        return True
+                    selected = staff_with_workload[0]
+                    staff = selected['staff']
+                    workload = selected['workload']
+                    
+                    conn = get_db_connection()
+                    if not conn:
+                        return False
+                    cur = conn.cursor()
+                    
+                    # Update incident
+                    cur.execute("""
+                        UPDATE incidents 
+                        SET assigned_to = %s, assigned_employee_id = %s, assigned_at = %s, status = 'ASSIGNED'
+                        WHERE incident_id = %s
+                    """, (staff['name'], staff['employee_id'], datetime.now(), incident_id))
+                    
+                    # Store in assignments table
+                    cur.execute("""
+                        INSERT INTO incident_assignments (incident_id, employee_id, employee_name, is_primary)
+                        VALUES (%s, %s, %s, TRUE)
+                        ON CONFLICT (incident_id, employee_id) DO NOTHING
+                    """, (incident_id, staff['employee_id'], staff['name']))
+                    
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                    
+                    print(f"✅ Assigned {incident_id} to {staff['name']} ({role}) [Workload: {workload['in_progress']} in-progress, {workload['total']} total]")
+                    
+                    add_to_history(incident_id, staff['employee_id'], staff['name'], 'ASSIGNED', 'OPEN', 'ASSIGNED',
+                                   f"Auto-assigned (least busy: {workload['total']} active incidents)")
+                    
+                    # Send notification
+                    publish_notification({
+                        'type': 'INCIDENT_ASSIGNED',
+                        'employee_id': staff['employee_id'],
+                        'employee_name': staff['name'],
+                        'employee_email': staff.get('email', ''),
+                        'employee_phone': staff.get('phone', ''),
+                        'incident_id': incident_id,
+                        'alert_type': alert_type,
+                        'severity': 'MEDIUM',
+                        'patient_id': 'Unknown',
+                        'title': 'New Incident Assigned',
+                        'message': f'{alert_type} incident assigned to you.',
+                        'data': {'incident_id': incident_id, 'alert_type': alert_type, 'role': role},
+                        'timestamp': datetime.now().isoformat()
+                    })
+                    return True
         
-        print(f"⚠️  No available staff found for incident {incident_id} (alert type: {alert_type})")
+        print(f"⚠️  No available staff for {incident_id} (alert: {alert_type}, tried: {role_priorities})")
         return False
         
     except Exception as e:
@@ -276,12 +310,14 @@ def create_incident_from_alert(alert_data):
             
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO incidents (incident_id, alert_id, patient_id, status, severity, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO incidents (incident_id, alert_id, patient_id, room, alert_type, status, severity, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             incident_id,
             alert_data['alert_id'],
             alert_data['patient_id'],
+            alert_data.get('room'),
+            alert_data.get('alert_type'),
             'OPEN',
             alert_data['severity'],
             datetime.now()
@@ -423,6 +459,103 @@ def get_incident(incident_id):
         print(f"❌ Error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/incidents/<incident_id>/claim', methods=['PATCH'])
+def claim_incident(incident_id):
+    """Allow any staff member to claim/take an incident even if not originally assigned to them."""
+    try:
+        data = request.get_json() or {}
+        employee_id = data.get('employee_id')
+        employee_name = data.get('employee_name')
+        
+        if not employee_id or not employee_name:
+            return jsonify({'error': 'employee_id and employee_name are required'}), 400
+        
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Get current incident
+        cur.execute("SELECT * FROM incidents WHERE incident_id = %s", (incident_id,))
+        incident = cur.fetchone()
+        
+        if not incident:
+            return jsonify({'error': 'Incident not found'}), 404
+        
+        # Can only claim if incident is OPEN, ASSIGNED, or ACKNOWLEDGED (not already in progress or resolved)
+        if incident['status'] not in ['OPEN', 'ASSIGNED', 'ACKNOWLEDGED']:
+            return jsonify({'error': f'Cannot claim incident with status {incident["status"]}. Only OPEN, ASSIGNED, or ACKNOWLEDGED incidents can be claimed.'}), 400
+        
+        previous_assignee = incident.get('assigned_to', 'Unassigned')
+        previous_status = incident['status']
+        
+        # Update incident assignment
+        cur.execute("""
+            UPDATE incidents 
+            SET assigned_to = %s,
+                assigned_employee_id = %s,
+                assigned_at = %s,
+                status = 'ACKNOWLEDGED'
+            WHERE incident_id = %s
+        """, (employee_name, employee_id, datetime.now(), incident_id))
+        
+        # Update or insert into incident_assignments
+        cur.execute("""
+            INSERT INTO incident_assignments (incident_id, employee_id, employee_name, is_primary)
+            VALUES (%s, %s, %s, TRUE)
+            ON CONFLICT (incident_id, employee_id) 
+            DO UPDATE SET is_primary = TRUE, assigned_at = NOW()
+        """, (incident_id, employee_id, employee_name))
+        
+        conn.commit()
+        
+        print(f"✅ Incident {incident_id} claimed by {employee_name} (was: {previous_assignee})")
+        
+        # Add to history
+        if previous_assignee == 'Unassigned' or previous_assignee is None:
+            note = f"Claimed unassigned incident"
+        else:
+            note = f"Claimed incident (previously assigned to {previous_assignee})"
+        
+        add_to_history(
+            incident_id,
+            employee_id,
+            employee_name,
+            'CLAIMED',
+            previous_status,
+            'ACKNOWLEDGED',
+            note
+        )
+        
+        # Send notification to previous assignee if there was one
+        if incident.get('assigned_employee_id') and incident['assigned_employee_id'] != employee_id:
+            try:
+                publish_notification({
+                    'type': 'INCIDENT_REASSIGNED',
+                    'employee_id': incident['assigned_employee_id'],
+                    'employee_name': incident['assigned_to'],
+                    'incident_id': incident_id,
+                    'title': 'Incident Claimed by Another Staff Member',
+                    'message': f'{employee_name} has claimed incident {incident_id}',
+                    'timestamp': datetime.now().isoformat()
+                })
+            except Exception as e:
+                print(f"⚠️ Could not notify previous assignee: {e}")
+        
+        # Get updated incident
+        cur.execute("SELECT * FROM incidents WHERE incident_id = %s", (incident_id,))
+        updated_incident = cur.fetchone()
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify(updated_incident), 200
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/incidents/<incident_id>/acknowledge', methods=['PATCH'])
 def acknowledge_incident(incident_id):
     """Employee acknowledges they've seen the incident (ASSIGNED → ACKNOWLEDGED)."""
@@ -542,7 +675,7 @@ def start_incident(incident_id):
             incident_id,
             employee_id,
             employee_name,
-            'STATUS_CHANGED',
+            'STARTED_PROGRESS',
             'ACKNOWLEDGED',
             'IN_PROGRESS',
             note
@@ -670,7 +803,7 @@ def resolve_incident(incident_id):
             incident_id,
             employee_id,
             employee_name,
-            'RESOLVED',
+            'INCIDENT_RESOLVED',
             incident['status'],
             'RESOLVED',
             resolution_notes

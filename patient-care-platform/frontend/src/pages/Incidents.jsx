@@ -53,6 +53,22 @@ function Incidents() {
         }
     };
 
+    const handleClaim = async (e, incidentId) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+            await incidentService.claimIncident(incidentId, {
+                employee_id: user.employee_id,
+                employee_name: user.name
+            });
+            addToast({ type: 'success', title: 'Success', message: 'Incident claimed successfully!' });
+            fetchIncidents();
+        } catch (error) {
+            const errorMsg = error.response?.data?.error || 'Failed to claim incident';
+            addToast({ type: 'critical', title: 'Error', message: errorMsg });
+        }
+    };
+
     // Filter incidents
     const filteredIncidents = incidents.filter(incident => {
         if (statusFilter && incident.status !== statusFilter) return false;
@@ -162,7 +178,7 @@ function Incidents() {
                                 </div>
 
                                 {/* Quick Actions */}
-                                {incident.assigned_employee_id === user?.employee_id && (
+                                {incident.assigned_employee_id === user?.employee_id ? (
                                     <div className="incident-actions">
                                         {incident.status === 'ASSIGNED' && (
                                             <button
@@ -190,6 +206,17 @@ function Incidents() {
                                             </Link>
                                         )}
                                     </div>
+                                ) : (
+                                    ['OPEN', 'ASSIGNED', 'ACKNOWLEDGED'].includes(incident.status) && (
+                                        <div className="incident-actions">
+                                            <button
+                                                className="btn btn-info btn-sm"
+                                                onClick={(e) => handleClaim(e, incident.incident_id)}
+                                            >
+                                                🤝 Claim
+                                            </button>
+                                        </div>
+                                    )
                                 )}
                             </div>
                         </Link>

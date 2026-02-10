@@ -72,13 +72,13 @@ function Metrics() {
             <div className="stats-grid">
                 <div className="stat-card">
                     <div className="stat-icon">⏱️</div>
-                    <div className="stat-value">{formatTime(metrics?.avg_response_time_seconds)}</div>
+                    <div className="stat-value">{formatTime(metrics?.average_times?.response_time_seconds)}</div>
                     <div className="stat-label">Avg Response Time</div>
                 </div>
 
                 <div className="stat-card success">
                     <div className="stat-icon">✅</div>
-                    <div className="stat-value">{formatTime(metrics?.avg_resolution_time_seconds)}</div>
+                    <div className="stat-value">{formatTime(metrics?.average_times?.resolution_time_seconds)}</div>
                     <div className="stat-label">Avg Resolution Time</div>
                 </div>
 
@@ -193,17 +193,22 @@ function Metrics() {
                             <tbody>
                                 <tr>
                                     <td>Average Response Time</td>
-                                    <td style={{ fontWeight: 600 }}>{formatTime(metrics.avg_response_time_seconds)}</td>
+                                    <td style={{ fontWeight: 600 }}>{formatTime(metrics.average_times?.response_time_seconds)}</td>
                                     <td style={{ color: 'var(--text-secondary)' }}>Time from incident creation to acknowledgment</td>
                                 </tr>
                                 <tr>
                                     <td>Average Resolution Time</td>
-                                    <td style={{ fontWeight: 600 }}>{formatTime(metrics.avg_resolution_time_seconds)}</td>
+                                    <td style={{ fontWeight: 600 }}>{formatTime(metrics.average_times?.resolution_time_seconds)}</td>
                                     <td style={{ color: 'var(--text-secondary)' }}>Time from acknowledgment to resolution</td>
                                 </tr>
                                 <tr>
+                                    <td>Average Total Time</td>
+                                    <td style={{ fontWeight: 600 }}>{formatTime(metrics.average_times?.total_time_seconds)}</td>
+                                    <td style={{ color: 'var(--text-secondary)' }}>Total time from creation to resolution</td>
+                                </tr>
+                                <tr>
                                     <td>Total Resolved</td>
-                                    <td style={{ fontWeight: 600 }}>{metrics.resolved_count || 0}</td>
+                                    <td style={{ fontWeight: 600 }}>{statusCounts['RESOLVED'] || 0}</td>
                                     <td style={{ color: 'var(--text-secondary)' }}>Incidents successfully resolved</td>
                                 </tr>
                                 <tr>

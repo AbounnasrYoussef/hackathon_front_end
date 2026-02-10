@@ -28,7 +28,13 @@ function IncidentDetail() {
         try {
             setLoading(true);
             const data = await incidentService.getIncident(incidentId);
-            setIncident(data);
+            // Backend returns { incident: {...}, history: [...] }
+            // Merge them together for convenience
+            if (data.incident) {
+                setIncident({ ...data.incident, history: data.history || [] });
+            } else {
+                setIncident(data);
+            }
         } catch (error) {
             console.error('Failed to fetch incident:', error);
             addToast({ type: 'critical', title: 'Error', message: 'Failed to load incident' });
@@ -84,6 +90,10 @@ function IncidentDetail() {
             addToast({ type: 'warning', title: 'Required', message: 'Resolution notes are required' });
             return;
         }
+        if (resolutionNotes.trim().length < 10) {
+            addToast({ type: 'warning', title: 'Too Short', message: 'Resolution notes must be at least 10 characters' });
+            return;
+        }
         setActionLoading(true);
         try {
             await incidentService.resolveIncident(incidentId, user.employee_id, user.name, resolutionNotes);
@@ -91,7 +101,9 @@ function IncidentDetail() {
             setShowResolveModal(false);
             fetchIncident();
         } catch (error) {
-            addToast({ type: 'critical', title: 'Error', message: 'Failed to resolve incident' });
+            const errorMsg = error.response?.data?.error || 'Failed to resolve incident';
+            console.error('Resolve error:', error.response?.data);
+            addToast({ type: 'critical', title: 'Error', message: errorMsg });
         } finally {
             setActionLoading(false);
         }
@@ -109,8 +121,42 @@ function IncidentDetail() {
         return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
     };
 
+    const formatActionName = (action) => {
+        const actionMap = {
+            'CREATED': '📝 Incident Created',
+            'ASSIGNED': '👤 Assigned',
+            'CLAIMED': '🤝 Claimed',
+            'ACKNOWLEDGED': '✓ Acknowledged',
+            'STARTED_PROGRESS': '▶ Started Progress',
+            'NOTE_ADDED': '📝 Note Added',
+            'INCIDENT_RESOLVED': '✅ Resolved',
+            'STATUS_CHANGED': '🔄 Status Changed'
+        };
+        return actionMap[action] || action?.replace('_', ' ');
+    };
+
     const getStatusClass = (status) => `status-${status?.toLowerCase()}`;
     const canPerformActions = incident?.assigned_employee_id === user?.employee_id;
+    const canClaimIncident = incident && ['OPEN', 'ASSIGNED', 'ACKNOWLEDGED'].includes(incident.status) && incident.assigned_employee_id !== user?.employee_id;
+
+    const handleClaim = async () => {
+        if (!user) return;
+        
+        setActionLoading(true);
+        try {
+            await incidentService.claimIncident(incident.incident_id, {
+                employee_id: user.employee_id,
+                employee_name: user.name
+            });
+            addToast({ type: 'success', title: 'Success', message: 'Incident claimed successfully!' });
+            fetchIncident();
+        } catch (error) {
+            const errorMsg = error.response?.data?.error || 'Failed to claim incident';
+            addToast({ type: 'critical', title: 'Error', message: errorMsg });
+        } finally {
+            setActionLoading(false);
+        }
+    };
 
     if (loading) {
         return (
@@ -147,7 +193,20 @@ function IncidentDetail() {
                     </div>
                 </div>
 
-                {/* Action Buttons */}
+                {/* Claim Button - for staff who are NOT assigned */}
+                {canClaimIncident && (
+                    <div className="header-actions">
+                        <button
+                            className="btn btn-info"
+                            onClick={handleClaim}
+                            disabled={actionLoading}
+                        >
+                            🤝 Claim This Incident
+                        </button>
+                    </div>
+                )}
+
+                {/* Action Buttons - for assigned staff */}
                 {canPerformActions && incident.status !== 'RESOLVED' && (
                     <div className="header-actions">
                         {incident.status === 'ASSIGNED' && (
@@ -286,7 +345,7 @@ function IncidentDetail() {
                             <div key={index} className="timeline-item">
                                 <div className="timeline-time">{formatDate(entry.timestamp)}</div>
                                 <div className="timeline-content">
-                                    <div className="timeline-action">{entry.action?.replace('_', ' ')}</div>
+                                    <div className="timeline-action">{formatActionName(entry.action)}</div>
                                     <div className="timeline-actor">by {entry.employee_name || 'System'}</div>
                                     {entry.note && (
                                         <p style={{ marginTop: '8px', color: 'var(--text-secondary)', fontSize: '14px' }}>

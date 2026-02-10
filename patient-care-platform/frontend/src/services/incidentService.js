@@ -14,6 +14,12 @@ const incidentService = {
         return response.data;
     },
 
+    // Claim an incident (allow any staff to take it)
+    claimIncident: async (incidentId, data) => {
+        const response = await incidentApi.patch(`/incidents/${incidentId}/claim`, data);
+        return response.data;
+    },
+
     // Acknowledge an incident (ASSIGNED → ACKNOWLEDGED)
     acknowledgeIncident: async (incidentId, employeeId, employeeName) => {
         const response = await incidentApi.patch(`/incidents/${incidentId}/acknowledge`, {

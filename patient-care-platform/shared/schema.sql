@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS incidents (
     incident_id VARCHAR(50) PRIMARY KEY,
     alert_id VARCHAR(50) REFERENCES alerts(alert_id),
     patient_id VARCHAR(20),
+    room VARCHAR(10),
+    alert_type VARCHAR(100),
     
     -- Status workflow: OPEN → ASSIGNED → ACKNOWLEDGED → IN_PROGRESS → RESOLVED
     status VARCHAR(20) DEFAULT 'OPEN',
@@ -102,6 +104,17 @@ CREATE TABLE IF NOT EXISTS incident_history (
     new_status VARCHAR(20),
     note TEXT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Incident assignments (many-to-many: one incident can be assigned to multiple staff)
+CREATE TABLE IF NOT EXISTS incident_assignments (
+    assignment_id SERIAL PRIMARY KEY,
+    incident_id VARCHAR(50) REFERENCES incidents(incident_id),
+    employee_id INTEGER REFERENCES employees(employee_id),
+    employee_name VARCHAR(100),
+    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_primary BOOLEAN DEFAULT FALSE,
+    UNIQUE(incident_id, employee_id)
 );
 
 -- Notifications table

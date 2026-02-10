@@ -8,6 +8,7 @@ function Dashboard() {
     const [incidents, setIncidents] = useState([]);
     const [metrics, setMetrics] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [actionLoading, setActionLoading] = useState({});
 
     useEffect(() => {
         fetchData();
@@ -31,17 +32,58 @@ function Dashboard() {
         }
     };
 
-    // Calculate stats
-    const openIncidents = incidents.filter(i => i.status === 'OPEN').length;
-    const assignedIncidents = incidents.filter(i => i.status === 'ASSIGNED').length;
-    const inProgressIncidents = incidents.filter(i => i.status === 'IN_PROGRESS').length;
-    const criticalIncidents = incidents.filter(i => i.severity === 'CRITICAL' && i.status !== 'RESOLVED').length;
+    const handleAcknowledge = async (incidentId, e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setActionLoading(prev => ({ ...prev, [incidentId]: true }));
+        try {
+            await incidentService.acknowledgeIncident(incidentId, user.employee_id, user.name);
+            fetchData();
+        } catch (error) {
+            console.error('Failed to acknowledge incident:', error);
+            alert('Failed to acknowledge incident');
+        } finally {
+            setActionLoading(prev => ({ ...prev, [incidentId]: false }));
+        }
+    };
 
-    // My assigned incidents
-    const myIncidents = incidents.filter(i =>
-        i.assigned_employee_id === user?.employee_id &&
-        i.status !== 'RESOLVED'
+    const handleStart = async (incidentId, e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setActionLoading(prev => ({ ...prev, [incidentId]: true }));
+        try {
+            await incidentService.startIncident(incidentId, user.employee_id, user.name);
+            fetchData();
+        } catch (error) {
+            console.error('Failed to start incident:', error);
+            alert('Failed to start incident');
+        } finally {
+            setActionLoading(prev => ({ ...prev, [incidentId]: false }));
+        }
+    };
+
+    // Calculate personal stats - only incidents assigned to me
+    const myIncidents = incidents.filter(i => i.assigned_employee_id === user?.employee_id);
+    
+    const myOpenIncidents = myIncidents.filter(i => i.status === 'OPEN').length;
+    const myAssignedIncidents = myIncidents.filter(i => i.status === 'ASSIGNED').length;
+    const myInProgressIncidents = myIncidents.filter(i => i.status === 'IN_PROGRESS').length;
+    const myCriticalIncidents = myIncidents.filter(i => i.severity === 'CRITICAL' && i.status !== 'RESOLVED').length;
+    const myResolvedIncidents = myIncidents.filter(i => i.status === 'RESOLVED').length;
+
+    // My active incidents (not resolved)
+    const myActiveIncidents = myIncidents.filter(i => i.status !== 'RESOLVED');
+
+    // Calculate my personal performance metrics
+    const myResolvedIncidentsWithTime = myIncidents.filter(i => 
+        i.status === 'RESOLVED' && i.response_time_seconds
     );
+    const myAvgResponseTime = myResolvedIncidentsWithTime.length > 0
+        ? Math.round(myResolvedIncidentsWithTime.reduce((sum, i) => sum + (i.response_time_seconds || 0), 0) / myResolvedIncidentsWithTime.length)
+        : null;
+    const myAvgResolutionTime = myResolvedIncidentsWithTime.length > 0
+        ? Math.round(myResolvedIncidentsWithTime.reduce((sum, i) => sum + (i.resolution_time_seconds || 0), 0) / myResolvedIncidentsWithTime.length)
+        : null;
 
     const formatTime = (seconds) => {
         if (!seconds) return 'N/A';
@@ -69,72 +111,82 @@ function Dashboard() {
     return (
         <div>
             <div className="header">
-                <h1 className="header-title">Dashboard</h1>
-                <button className="btn btn-primary" onClick={fetchData}>
-                    🔄 Refresh
-                </button>
+                <h1 className="header-title">My Dashboard</h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)' }}>{user?.name}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{user?.role?.replace('_', ' ')} • ID: {user?.login}</div>
+                    </div>
+                    <button className="btn btn-primary" onClick={fetchData}>
+                        🔄 Refresh
+                    </button>
+                </div>
             </div>
 
-            {/* Stats Grid */}
+            {/* Personal Stats Grid */}
             <div className="stats-grid">
                 <div className="stat-card critical">
                     <div className="stat-icon">🚨</div>
-                    <div className="stat-value">{criticalIncidents}</div>
-                    <div className="stat-label">Critical Incidents</div>
+                    <div className="stat-value">{myCriticalIncidents}</div>
+                    <div className="stat-label">My Critical Cases</div>
                 </div>
 
                 <div className="stat-card warning">
                     <div className="stat-icon">📋</div>
-                    <div className="stat-value">{openIncidents}</div>
-                    <div className="stat-label">Open Incidents</div>
-                </div>
-
-                <div className="stat-card">
-                    <div className="stat-icon">👤</div>
-                    <div className="stat-value">{assignedIncidents}</div>
-                    <div className="stat-label">Assigned</div>
+                    <div className="stat-value">{myAssignedIncidents}</div>
+                    <div className="stat-label">Assigned to Me</div>
                 </div>
 
                 <div className="stat-card">
                     <div className="stat-icon">⚡</div>
-                    <div className="stat-value">{inProgressIncidents}</div>
+                    <div className="stat-value">{myInProgressIncidents}</div>
                     <div className="stat-label">In Progress</div>
+                </div>
+
+                <div className="stat-card success">
+                    <div className="stat-icon">✅</div>
+                    <div className="stat-value">{myResolvedIncidents}</div>
+                    <div className="stat-label">Resolved by Me</div>
                 </div>
             </div>
 
-            {/* Metrics Cards */}
-            {metrics && (
-                <div className="stats-grid" style={{ marginBottom: '24px' }}>
-                    <div className="stat-card success">
-                        <div className="stat-icon">⏱️</div>
-                        <div className="stat-value">{formatTime(metrics.avg_response_time_seconds)}</div>
-                        <div className="stat-label">Avg Response Time</div>
-                    </div>
-
-                    <div className="stat-card success">
-                        <div className="stat-icon">✅</div>
-                        <div className="stat-value">{formatTime(metrics.avg_resolution_time_seconds)}</div>
-                        <div className="stat-label">Avg Resolution Time</div>
-                    </div>
-
-                    <div className="stat-card success">
-                        <div className="stat-icon">📊</div>
-                        <div className="stat-value">{metrics.resolved_count || 0}</div>
-                        <div className="stat-label">Resolved Today</div>
-                    </div>
+            {/* My Performance Metrics */}
+            <div className="stats-grid" style={{ marginBottom: '24px' }}>
+                <div className="stat-card success">
+                    <div className="stat-icon">⏱️</div>
+                    <div className="stat-value">{formatTime(myAvgResponseTime)}</div>
+                    <div className="stat-label">My Avg Response Time</div>
                 </div>
-            )}
+
+                <div className="stat-card success">
+                    <div className="stat-icon">🏁</div>
+                    <div className="stat-value">{formatTime(myAvgResolutionTime)}</div>
+                    <div className="stat-label">My Avg Resolution Time</div>
+                </div>
+
+                <div className="stat-card">
+                    <div className="stat-icon">📊</div>
+                    <div className="stat-value">{myActiveIncidents.length}</div>
+                    <div className="stat-label">Active Cases</div>
+                </div>
+
+                <div className="stat-card">
+                    <div className="stat-icon">📈</div>
+                    <div className="stat-value">{myIncidents.length}</div>
+                    <div className="stat-label">Total Assigned</div>
+                </div>
+            </div>
 
             {/* My Incidents */}
             <div className="card">
                 <div className="card-header">
-                    <h2 className="card-title">My Active Incidents</h2>
+                    <h2 className="card-title">My Active Incidents ({myActiveIncidents.length})</h2>
                     <Link to="/incidents" className="btn btn-secondary btn-sm">
                         View All →
                     </Link>
                 </div>
 
-                {myIncidents.length === 0 ? (
+                {myActiveIncidents.length === 0 ? (
                     <div className="empty-state">
                         <div className="empty-state-icon">✨</div>
                         <div className="empty-state-title">No active incidents</div>
@@ -142,13 +194,16 @@ function Dashboard() {
                     </div>
                 ) : (
                     <div>
-                        {myIncidents.slice(0, 5).map(incident => (
-                            <Link
+                        {myActiveIncidents.map(incident => (
+                            <div
                                 key={incident.incident_id}
-                                to={`/incidents/${incident.incident_id}`}
-                                style={{ textDecoration: 'none' }}
+                                className={`incident-card ${getSeverityClass(incident.severity)}`}
+                                style={{ marginBottom: '12px' }}
                             >
-                                <div className={`incident-card ${getSeverityClass(incident.severity)}`}>
+                                <Link
+                                    to={`/incidents/${incident.incident_id}`}
+                                    style={{ textDecoration: 'none', flex: 1 }}
+                                >
                                     <div className="incident-header">
                                         <div>
                                             <span className="incident-id">{incident.incident_id}</span>
@@ -171,57 +226,42 @@ function Dashboard() {
                                             ⏰ {new Date(incident.created_at).toLocaleTimeString()}
                                         </span>
                                     </div>
+                                </Link>
+                                
+                                {/* Action Buttons */}
+                                <div style={{ display: 'flex', gap: '8px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border-color)' }}>
+                                    {incident.status === 'ASSIGNED' && (
+                                        <button
+                                            className="btn btn-success btn-sm"
+                                            onClick={(e) => handleAcknowledge(incident.incident_id, e)}
+                                            disabled={actionLoading[incident.incident_id]}
+                                        >
+                                            {actionLoading[incident.incident_id] ? '...' : '✓ Acknowledge'}
+                                        </button>
+                                    )}
+                                    {incident.status === 'ACKNOWLEDGED' && (
+                                        <button
+                                            className="btn btn-primary btn-sm"
+                                            onClick={(e) => handleStart(incident.incident_id, e)}
+                                            disabled={actionLoading[incident.incident_id]}
+                                        >
+                                            {actionLoading[incident.incident_id] ? '...' : '▶ Start Progress'}
+                                        </button>
+                                    )}
+                                    {incident.status === 'IN_PROGRESS' && (
+                                        <Link 
+                                            to={`/incidents/${incident.incident_id}`}
+                                            className="btn btn-warning btn-sm"
+                                            style={{ textDecoration: 'none' }}
+                                        >
+                                            🏁 Resolve →
+                                        </Link>
+                                    )}
                                 </div>
-                            </Link>
+                            </div>
                         ))}
                     </div>
                 )}
-            </div>
-
-            {/* Recent All Incidents */}
-            <div className="card" style={{ marginTop: '24px' }}>
-                <div className="card-header">
-                    <h2 className="card-title">Recent Incidents</h2>
-                </div>
-
-                <div className="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Incident ID</th>
-                                <th>Patient</th>
-                                <th>Severity</th>
-                                <th>Status</th>
-                                <th>Assigned To</th>
-                                <th>Created</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {incidents.slice(0, 10).map(incident => (
-                                <tr key={incident.incident_id}>
-                                    <td>
-                                        <Link to={`/incidents/${incident.incident_id}`} style={{ fontWeight: 600 }}>
-                                            {incident.incident_id}
-                                        </Link>
-                                    </td>
-                                    <td>{incident.patient_id}</td>
-                                    <td>
-                                        <span className={`badge badge-${incident.severity?.toLowerCase()}`}>
-                                            {incident.severity}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <span className={`status-badge ${getStatusClass(incident.status)}`}>
-                                            {incident.status?.replace('_', ' ')}
-                                        </span>
-                                    </td>
-                                    <td>{incident.assigned_to || '—'}</td>
-                                    <td>{new Date(incident.created_at).toLocaleString()}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
             </div>
         </div>
     );
