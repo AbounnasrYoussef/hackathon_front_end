@@ -1,8 +1,0 @@
-flask
-flask-cors
-flask-socketio
-psycopg2-binary
-pika
-python-dotenv
-python-socketio
-eventlet
